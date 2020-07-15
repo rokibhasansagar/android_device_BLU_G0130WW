@@ -1,0 +1,92 @@
+version: 2.1
+jobs:
+  build:
+    docker:
+      - image: fr3akyphantom/droid-builder:edge
+    environment:
+      # GitHubMail: "" # Git User Email Address
+      # GitHubName: "" # Git Username
+      # GITHUB_TOKEN: '' # MUST BE SECRET & PUT IN CIRCLECI PROJECT ENV VARS
+      VENDOR: 'BLU' # MANDATORY
+      CODENAME: 'G0130WW' # MANDATORY
+      FLAVOR: 'userdebug' # MANDATORY
+    working_directory: /home/builder/android
+    steps:
+      - run:
+          name: AIO Build
+          command: |
+            # SANITY CHECKS
+            if [[ -z $GitHubMail ]]; then echo -e "You haven't configured GitHub E-Mail Address." && exit 1; fi
+            if [[ -z $GitHubName ]]; then echo -e "You haven't configured GitHub Username." && exit 1; fi
+            if [[ -z $GITHUB_TOKEN ]]; then echo -e "You haven't configured GitHub Token.\nWithout it, recovery can't be published." && exit 1; fi
+            if [[ -z $VENDOR ]]; then echo -e "You haven't configured Vendor name." && exit 1; fi
+            if [[ -z $CODENAME ]]; then echo -e "You haven't configured Device Codename." && exit 1; fi
+            if [[ -z $FLAVOR ]]; then echo -e "Set as 'eng' or 'userdebug'." && exit 1; fi
+            
+            # Set GitAuth Infos"
+            git config --global user.email $GitHubMail
+            git config --global user.name $GitHubName
+            git config --global credential.helper store
+            git config --global color.ui true
+            
+            echo -e "\nSetup Google Cookies for Smooth googlesource Cloning\n"
+            git clone -q "https://$GITHUB_TOKEN@github.com/$GitHubName/google-git-cookies.git" &> /dev/null
+            bash google-git-cookies/setup_cookies.sh
+            rm -rf google-git-cookies
+            
+            cd /home/builder/android
+            
+            echo -e "Initializing minimal manifest repo\n"
+            repo init -q -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-9.0 --depth 1
+            
+            echo -e "\nRemoving Unimportant Darwin-specific Files from syncing"
+            cd .repo/manifests
+            find . -type f -name '*.xml' | xargs sed -i '/darwin/d'
+            git commit -a -m "Magic" || true
+            cd ../ && sed -i '/darwin/d' manifest.xml && cd ../
+            
+            echo -e "Fired-up minimal manifest repo sync,\nThis will take time...\n"
+            repo sync -c -q --force-sync --no-clone-bundle --no-tags -j$(nproc --all)
+            
+            # Unshallow vendor_omni (Only for Unofficial Builds)
+            echo -e "\nFixing Unofficial TWRP Build lunch error\n"
+            repo forall vendor/omni -c "git fetch --unshallow omnirom android-9.0"
+            # Retain "roomservice: Do not overwrite existing repositories"
+            repo forall vendor/omni -c "git revert 718f4c2fd6890f5eaa2d4972b1c3f3f582b5da47 -Xtheirs --no-edit --no-commit"
+            # Retain "roomservice: Do not overwrite existing devices"
+            repo forall vendor/omni -c "git revert 380d19cea2857d5901d7e7163f65ccc66d7bbad7 -Xtheirs --no-edit --no-commit"
+            # Add those retains into local commit
+            repo forall vendor/omni -c "git commit -m 'Fix Build from forked/personal repos'"
+            
+            echo -e "\nGetting Device Tree on Place via git clone\n"
+            git clone -q https://github.com/rokibhasansagar/android_device_BLU_G0130WW -b twrp-9.0 device/${VENDOR}/${CODENAME}
+            
+            echo -e "\nPreparing Delicious Lunch..."
+            export ALLOW_MISSING_DEPENDENCIES=true
+            source build/envsetup.sh
+            lunch omni_${CODENAME}-${FLAVOR}
+            
+            export Today=$(date +%Y%m%d)
+            echo -e "\nBuilding Started, Please wait patiently...\n"
+            make -j$(nproc --all) recoveryimage
+            echo -e "\nBuild Successful.\n"
+            
+            echo -e "\nReady to Deploy...\n"
+            mkdir upload
+            export version=$(cat bootable/recovery/variables.h | grep "define TW_MAIN_VERSION_STR" | cut -d '"' -f2)
+            cp out/target/product/${CODENAME}/recovery.img upload/TWRP_v${version}-${CODENAME}-${Today}-Unofficial.img
+            cp out/target/product/${CODENAME}/ramdisk-recovery.* upload/
+            ls -lA upload/
+            ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -n "Latest TWRP Release for $(echo $CODENAME)" -b "TWRP $(echo $version)" -delete twrp_v${version} upload/
+
+workflows:
+  version: 2
+  build_and_test:
+    jobs:
+      - build:
+          filters:
+            branches:
+              only: 'twrp-9.0'
+          context: personal-envs
+          # if you are copy-pasting this script,
+          # set $GitHubMail, $GitHubName and $GITHUB_TOKEN in the environment variables
