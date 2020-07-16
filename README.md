@@ -1,8 +1,16 @@
-# TWRP Device Tree - BLU G9 - G0130WW
+# Unofficial TWRP Device Tree for BLU G9 - G0130WW
+
+Original Tree made by @lopestom and built by @rokibhasansagar
 
 ## About Device
 
 ![BLU G9 G0130WW](https://fdn2.gsmarena.com/vv/pics/blu/blu-g9-1.jpg)
+
+## Download links
+
+- Latest Unoficial TWRP v3.4.0 at https://github.com/rokibhasansagar/android_device_BLU_G0130WW/releases/tag/twrp_v3.4.0
+
+- Latest PitchBlack Recovery at https://github.com/rokibhasansagar/android_device_BLU_G0130WW/releases/tag/2.9.1-test
 
 ### Specifications
 
@@ -49,7 +57,31 @@ Speed | HSPA 42.2/11.5 Mbps, LTE-A (2CA) Cat6 300/50 Mbps
 **This device tree can be used to build TWRP for BLU G9 - G0130WW**
 
 
-## Build Instructions
+## Build Instructions for Developers
+
+Sync Minimal Manifest Sources with _twrp-9.0_ branch in a separate directory inside HOME
+```bash
+mkdir -p $HOME/android && cd $HOME/android/
+repo init -q -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-9.0 --depth 1
+repo sync -c -q --force-sync --no-clone-bundle --no-tags -j$(nproc --all)
+```
+Do the following _Hack_ (right after repo sync ends) for bypassing the _OmniROM roomservice_ which now prevents lunching Unofficial Devices.
+```bash
+# Unshallow vendor_omni (Only for Unofficial Builds)
+echo -e "\nFixing Unofficial TWRP Build lunch error\n"
+repo forall vendor/omni -c "git fetch --unshallow omnirom android-9.0"
+# Retain "roomservice: Do not overwrite existing repositories"
+repo forall vendor/omni -c "git revert 718f4c2fd6890f5eaa2d4972b1c3f3f582b5da47 -Xtheirs --no-edit --no-commit"
+# Retain "roomservice: Do not overwrite existing devices"
+repo forall vendor/omni -c "git revert 380d19cea2857d5901d7e7163f65ccc66d7bbad7 -Xtheirs --no-edit --no-commit"
+# Add those retains into local commit
+repo forall vendor/omni -c "git commit -m 'Fix Build from forked/personal repos'"
+```
+Now git clone this repository
+```bash
+git clone https://github.com/rokibhasansagar/android_device_BLU_G0130WW -b android-9.0 device/BLU/G0130WW
+```
+Now, Start the build process
 ```bash
 export ALLOW_MISSING_DEPENDENCIES=true
 . build/envsetup.sh
